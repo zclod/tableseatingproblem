@@ -1,8 +1,10 @@
 from z3 import *
+import pandas as pd
+import numpy as np
 
 INVITATI = 10
-NUM_TAVOLI= 3
-DIM_TAVOLI = 4
+NUM_TAVOLI= 4
+DIM_TAVOLI = 3
 
 def postiVicini(posto):
     t_n = posto // DIM_TAVOLI
@@ -13,13 +15,27 @@ def postiVicini(posto):
 
 if __name__ == "__main__":
 
+    vincoli = pd.read_csv("test.csv")
+
+    accompagnatori = np.zeros(vincoli.shape, int)
+    accompagnatori[vincoli == 100] = 1
+
+    divisi = np.zeros(vincoli.shape, int)
+    divisi[vincoli == -100] = 1
+
+    preferenze = vincoli.to_numpy()
+    preferenze[preferenze==100] = 0
+    preferenze[preferenze==-100] = 0
+
     #https://ericpony.github.io/z3py-tutorial/guide-examples.htm
 
+    # un posto per ogni invitato
     p = [Int("p_%s" % i) for i in range(INVITATI)]
 
-    # ad ogni posto deve corrispondere un invitato
+    # ad ogni posto deve corrispondere un unico invitato
     val_p = [And(0 <= p[i], p[i] < INVITATI) for i in range(INVITATI)]
 
+    # tutti gli invitati devono avere un posto
     tutti_seduti = [Distinct([p[i] for i in range(INVITATI)])]
 
 
@@ -29,61 +45,23 @@ if __name__ == "__main__":
     s.add(val_p)
     s.add(tutti_seduti)
 
-    
-    accompagnatori = (
-                (0,0,0,0,0,0,0,0,0,0),
-                (0,0,0,0,0,0,0,0,0,0),
-                (0,0,0,0,0,0,0,0,0,0),
-                (0,0,0,0,0,0,0,0,0,0),
-                (0,0,0,0,0,0,0,0,0,0),
-                (0,0,0,0,0,0,0,0,0,0),
-                (0,0,0,0,0,0,0,0,0,0),
-                (0,0,0,0,0,0,0,0,0,0),
-                (0,0,0,0,0,0,0,0,0,0),
-                (0,0,0,0,0,0,0,0,0,0)
-            )
-
-    #acc_c = [If(accompagnatori[j][i] == 1 and p[k] == i, Or([p[min(s, INVITATI - 1)] == j for s in postiVicini(k)]) ,True) for i in range(INVITATI) for j in range(i) for k in range(INVITATI)]
-
+    ##################################
+    # gli invitati devono essere seduti nello stesso tavolo dei propri accompagnatori
     acc_c = [If(p[k] == i, Or([p[min(s, INVITATI - 1)] == j for s in postiVicini(k)]) ,True) for i in range(INVITATI) for j in range(i) for k in range(INVITATI) if accompagnatori[i][j] == 1]
 
     s.add(acc_c)
+    ##################################
 
-    #print (acc_c)
-    divisi = (
-                (0,0,0,0,0,0,0,0,0,0),
-                (0,0,0,0,0,0,0,0,0,0),
-                (0,0,0,0,0,0,0,0,0,0),
-                (0,0,0,0,0,0,0,0,0,0),
-                (0,0,0,0,0,0,0,0,0,0),
-                (0,0,0,0,0,0,0,0,0,0),
-                (0,0,0,0,0,0,0,0,0,0),
-                (0,0,0,0,0,0,0,0,0,0),
-                (0,0,0,0,0,0,0,0,0,0),
-                (0,0,0,0,0,0,0,0,0,0)
-            )
-
+    # gli invitati devono essere in un tavolo diverso dalle persone con cui non vanno d'accordo
     div_c = [If(p[k] == i, And([p[min(s, INVITATI - 1)] != j for s in postiVicini(k)]) ,True) for i in range(INVITATI) for j in range(i) for k in range(INVITATI) if divisi[i][j] == 1]
 
     s.add(div_c)
 
-    preferenze = (
-                (0,0,0,0,0,0,0,0,0,0),
-                (0,0,0,0,0,0,0,0,0,0),
-                (0,10,0,0,0,0,0,0,0,0),
-                (0,0,0,0,0,0,0,0,0,0),
-                (0,0,0,0,0,0,0,0,0,0),
-                (0,0,0,30,0,0,0,0,0,0),
-                (30,0,0,0,0,0,0,0,0,0),
-                (0,0,0,10,0,0,0,0,0,0),
-                (0,0,0,10,0,0,0,0,0,0),
-                (0,0,0,0,0,0,10,0,0,0)
-            )
-
+    #################################
     PREF = Array("PREF", IntSort(), IntSort())
     for i in range(INVITATI):
         for j in range (i):
-            PREF = Store(PREF, (j + i*INVITATI), preferenze[i][j])
+            PREF = Store(PREF, (j + i*INVITATI), int(preferenze[i][j]))
 
     ints = []
     for t in range(NUM_TAVOLI):
@@ -97,12 +75,17 @@ if __name__ == "__main__":
 
     mx = s.maximize(sum(ints))
 
+
+    ############################################
+    #pretty print del risultato
     if(s.check() == sat):
         m = s.model()
         
         for i in range(INVITATI):
             if i % DIM_TAVOLI == 0:
                 print("-------------")
-            print(m.evaluate(p[i]))
+                print("tavolo ", i//DIM_TAVOLI + 1)
+            #print(m.evaluate(p[i]), vincoli.columns[m.evaluate(p[i]).as_long()])
+            print(vincoli.columns[m.evaluate(p[i]).as_long()])
     else:
         print("unsat")

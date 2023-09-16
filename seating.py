@@ -3,17 +3,28 @@ import pandas as pd
 import numpy as np
 
 INVITATI = 10
-NUM_TAVOLI= 4
-DIM_TAVOLI = 3
 
-def postiVicini(posto):
-    t_n = posto // DIM_TAVOLI
-    return [(t_n*DIM_TAVOLI + i) for i in range(DIM_TAVOLI)]
+TAVOLI = [3,2,3,2]
 
-#def getInvitato(ps, t, i):
-#    return ps[i + (t*DIM_TAVOLI)]
+def postiVicini1(posto):
+    acc = 0
+    for i in range(NUM_TAVOLI):
+        if posto >= (acc-1) and posto < (acc + TAVOLI[i]):
+            return [acc + j for j in range(TAVOLI[i])]
+
+        acc += TAVOLI[i]
+    return []
 
 if __name__ == "__main__":
+
+    NUM_TAVOLI = len(TAVOLI)
+    POSTO_INIZIALE = []
+    
+    x=0
+    for i in range(NUM_TAVOLI):
+        POSTO_INIZIALE.append(x)
+        x += TAVOLI[i]
+
 
     vincoli = pd.read_csv("test.csv")
 
@@ -27,7 +38,9 @@ if __name__ == "__main__":
     preferenze[preferenze==100] = 0
     preferenze[preferenze==-100] = 0
 
-    #https://ericpony.github.io/z3py-tutorial/guide-examples.htm
+    s = Optimize()
+
+    ###################################
 
     # un posto per ogni invitato
     p = [Int("p_%s" % i) for i in range(INVITATI)]
@@ -39,23 +52,15 @@ if __name__ == "__main__":
     tutti_seduti = [Distinct([p[i] for i in range(INVITATI)])]
 
 
-    #s = Solver()
-    s = Optimize()
-
-    s.add(val_p)
-    s.add(tutti_seduti)
-
     ##################################
     # gli invitati devono essere seduti nello stesso tavolo dei propri accompagnatori
-    acc_c = [If(p[k] == i, Or([p[min(s, INVITATI - 1)] == j for s in postiVicini(k)]) ,True) for i in range(INVITATI) for j in range(i) for k in range(INVITATI) if accompagnatori[i][j] == 1]
+    acc_c = [Or([Or([And(p[s] == i, p[t] == j) for s in postiVicini1(POSTO_INIZIALE[k]) for t in postiVicini1(POSTO_INIZIALE[k]) if (s < INVITATI and t < INVITATI)]) for k in range(NUM_TAVOLI)]) for i in range(INVITATI) for j in range(INVITATI) if accompagnatori[i][j] == 1]
 
-    s.add(acc_c)
     ##################################
 
-    # gli invitati devono essere in un tavolo diverso dalle persone con cui non vanno d'accordo
-    div_c = [If(p[k] == i, And([p[min(s, INVITATI - 1)] != j for s in postiVicini(k)]) ,True) for i in range(INVITATI) for j in range(i) for k in range(INVITATI) if divisi[i][j] == 1]
+    ## gli invitati devono essere in un tavolo diverso dalle persone con cui non vanno d'accordo
+    div_c = [Not(Or([Or([And(p[s] == i, p[t] == j) for s in postiVicini1(POSTO_INIZIALE[k]) for t in postiVicini1(POSTO_INIZIALE[k]) if (s < INVITATI and t < INVITATI)]) for k in range(NUM_TAVOLI)])) for i in range(INVITATI) for j in range(INVITATI) if divisi[i][j] == 1]
 
-    s.add(div_c)
 
     #################################
     PREF = Array("PREF", IntSort(), IntSort())
@@ -63,29 +68,42 @@ if __name__ == "__main__":
         for j in range (i):
             PREF = Store(PREF, (j + i*INVITATI), int(preferenze[i][j]))
 
+
     ints = []
     for t in range(NUM_TAVOLI):
-        for i in range(DIM_TAVOLI):
-            for j in range(i+1,DIM_TAVOLI):
-                if (j + t*DIM_TAVOLI) < INVITATI and (i + t*DIM_TAVOLI) < INVITATI:
-                    i1 = p[i + t*DIM_TAVOLI]
-                    i2 = p[j + t*DIM_TAVOLI]
+        for i in range(TAVOLI[t]):
+            for j in range(i+1,TAVOLI[t]):
+                if (j + POSTO_INIZIALE[t]) < INVITATI and (i + POSTO_INIZIALE[t]) < INVITATI:
+                    i1 = p[i + POSTO_INIZIALE[t]]
+                    i2 = p[j + POSTO_INIZIALE[t]]
                     s.add(i1 > i2)
                     ints.append(Select(PREF,(i2 + i1*INVITATI)))
 
-    mx = s.maximize(sum(ints))
+    #################################
 
+    s.add(val_p)
+    s.add(tutti_seduti)
+    s.add(acc_c)
+    s.add(div_c)
+    s.maximize(sum(ints))
 
-    ############################################
-    #pretty print del risultato
+    #################################
+    #pretty print the final result
+
     if(s.check() == sat):
         m = s.model()
         
+        print("-------------")
+        print("tavolo 1")
+
+        t = 0
+        acc = TAVOLI[0]
         for i in range(INVITATI):
-            if i % DIM_TAVOLI == 0:
-                print("-------------")
-                print("tavolo ", i//DIM_TAVOLI + 1)
-            #print(m.evaluate(p[i]), vincoli.columns[m.evaluate(p[i]).as_long()])
             print(vincoli.columns[m.evaluate(p[i]).as_long()])
+            if (i+1) == acc and (i+1) < INVITATI:
+                t += 1
+                acc += TAVOLI[t]
+                print("-------------")
+                print("tavolo ", t + 1)
     else:
         print("unsat")

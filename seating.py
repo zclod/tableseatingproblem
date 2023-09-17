@@ -2,90 +2,115 @@ from z3 import *
 import pandas as pd
 import numpy as np
 
-INVITATI = 10
+###################################
+# global variables
 
-TAVOLI = [3,2,3,2]
+GUESTS = 10
 
-def postiVicini1(posto):
+TABLES = [3,3,2,2]
+
+###################################
+# utilities
+
+def sumscan(l):
     acc = 0
-    for i in range(NUM_TAVOLI):
-        if posto >= (acc-1) and posto < (acc + TAVOLI[i]):
-            return [acc + j for j in range(TAVOLI[i])]
+    result = [acc]
+    for i in range(len(l)):
+        acc += l[i]
+        result.append(acc)
+    return result
 
-        acc += TAVOLI[i]
-    return []
+def neighbours(seat):
+    startingSeats = sumscan(TABLES)
+    return [ startingSeats[i] + j
+            for i in range(len(TABLES))
+            for j in range(TABLES[i])
+            if ((seat >= startingSeats[i] and seat < startingSeats[i+1])) ]
+
+
+
+
+###################################
+# model definition
 
 if __name__ == "__main__":
 
-    NUM_TAVOLI = len(TAVOLI)
-    POSTO_INIZIALE = []
+    numTables = len(TABLES)
+    tablesStartingSeats = sumscan(TABLES)
     
-    x=0
-    for i in range(NUM_TAVOLI):
-        POSTO_INIZIALE.append(x)
-        x += TAVOLI[i]
+    # constraint matrix, 100 and -100 are hard constraints, intermediate values are just preferences
+    costraints = pd.read_csv("test.csv")
 
+    seatNeighbour = np.zeros(costraints.shape, int)
+    seatNeighbour[costraints == 100] = 1
 
-    vincoli = pd.read_csv("test.csv")
+    separated = np.zeros(costraints.shape, int)
+    separated[costraints == -100] = 1
 
-    accompagnatori = np.zeros(vincoli.shape, int)
-    accompagnatori[vincoli == 100] = 1
+    preferences = costraints.to_numpy()
+    preferences[preferences==100] = 0
+    preferences[preferences==-100] = 0
 
-    divisi = np.zeros(vincoli.shape, int)
-    divisi[vincoli == -100] = 1
-
-    preferenze = vincoli.to_numpy()
-    preferenze[preferenze==100] = 0
-    preferenze[preferenze==-100] = 0
-
+    #solver
     s = Optimize()
 
     ###################################
+    # model variables
 
-    # un posto per ogni invitato
-    p = [Int("p_%s" % i) for i in range(INVITATI)]
+    # one seat for every guest
+    seat = [Int("seat_%s" % i) for i in range(GUESTS)]
 
-    # ad ogni posto deve corrispondere un unico invitato
-    val_p = [And(0 <= p[i], p[i] < INVITATI) for i in range(INVITATI)]
-
-    # tutti gli invitati devono avere un posto
-    tutti_seduti = [Distinct([p[i] for i in range(INVITATI)])]
-
-
-    ##################################
-    # gli invitati devono essere seduti nello stesso tavolo dei propri accompagnatori
-    acc_c = [Or([Or([And(p[s] == i, p[t] == j) for s in postiVicini1(POSTO_INIZIALE[k]) for t in postiVicini1(POSTO_INIZIALE[k]) if (s < INVITATI and t < INVITATI)]) for k in range(NUM_TAVOLI)]) for i in range(INVITATI) for j in range(INVITATI) if accompagnatori[i][j] == 1]
-
-    ##################################
-
-    ## gli invitati devono essere in un tavolo diverso dalle persone con cui non vanno d'accordo
-    div_c = [Not(Or([Or([And(p[s] == i, p[t] == j) for s in postiVicini1(POSTO_INIZIALE[k]) for t in postiVicini1(POSTO_INIZIALE[k]) if (s < INVITATI and t < INVITATI)]) for k in range(NUM_TAVOLI)])) for i in range(INVITATI) for j in range(INVITATI) if divisi[i][j] == 1]
-
-
-    #################################
+    # z3 "matrix" to be accessed throught z3 variables as indexes
     PREF = Array("PREF", IntSort(), IntSort())
-    for i in range(INVITATI):
+    for i in range(GUESTS):
         for j in range (i):
-            PREF = Store(PREF, (j + i*INVITATI), int(preferenze[i][j]))
+            PREF = Store(PREF, (j + i*GUESTS), int(preferences[i][j]))
 
+    ###################################
+    # Solution constraints
 
-    ints = []
-    for t in range(NUM_TAVOLI):
-        for i in range(TAVOLI[t]):
-            for j in range(i+1,TAVOLI[t]):
-                if (j + POSTO_INIZIALE[t]) < INVITATI and (i + POSTO_INIZIALE[t]) < INVITATI:
-                    i1 = p[i + POSTO_INIZIALE[t]]
-                    i2 = p[j + POSTO_INIZIALE[t]]
+    # for every seat there must be a guest assigned
+    seat_val = [And(0 <= seat[i], seat[i] < GUESTS) for i in range(GUESTS)]
+
+    # every guest must have a unique seat
+    everyone_seated = [Distinct([seat[i] for i in range(GUESTS)])]
+
+    # every guest must be at the same table of its seat neighbours
+    neighbour_c = [Or([Or([And(seat[s] == i, seat[t] == j) for s in neighbours(tablesStartingSeats[k])
+                     for t in neighbours(tablesStartingSeats[k]) if (s < GUESTS and t < GUESTS)])
+                 for k in range(numTables)]) 
+             for i in range(GUESTS) 
+             for j in range(GUESTS) if seatNeighbour[i][j] == 1]
+
+    # every guest must be in a different table with respect to the guests marked as separated
+    separated_c = [Not(Or([Or([And(seat[s] == i, seat[t] == j) for s in neighbours(tablesStartingSeats[k])
+                         for t in neighbours(tablesStartingSeats[k]) if (s < GUESTS and t < GUESTS)])
+                     for k in range(numTables)]))
+             for i in range(GUESTS)
+             for j in range(GUESTS) if separated[i][j] == 1]
+
+    #################################
+    # Find the optimal solution
+
+    # list of preference values computed for every table to be maximized
+    totalPreference = []
+    for t in range(numTables):
+        for i in range(TABLES[t]):
+            for j in range(i+1,TABLES[t]):
+                if (j + tablesStartingSeats[t]) < GUESTS and (i + tablesStartingSeats[t]) < GUESTS:
+                    i1 = seat[i + tablesStartingSeats[t]]
+                    i2 = seat[j + tablesStartingSeats[t]]
+                    #impose an ordering constraint to the table for performance reason
                     s.add(i1 > i2)
-                    ints.append(Select(PREF,(i2 + i1*INVITATI)))
+                    totalPreference.append(Select(PREF,(i2 + i1*GUESTS)))
 
     #################################
 
-    s.add(val_p)
-    s.add(tutti_seduti)
-    s.add(acc_c)
-    s.add(div_c)
-    s.maximize(sum(ints))
+    s.add(seat_val)
+    s.add(everyone_seated)
+    s.add(neighbour_c)
+    s.add(separated_c)
+    s.maximize(sum(totalPreference))
 
     #################################
     #pretty print the final result
@@ -94,16 +119,16 @@ if __name__ == "__main__":
         m = s.model()
         
         print("-------------")
-        print("tavolo 1")
+        print("table 1")
 
         t = 0
-        acc = TAVOLI[0]
-        for i in range(INVITATI):
-            print(vincoli.columns[m.evaluate(p[i]).as_long()])
-            if (i+1) == acc and (i+1) < INVITATI:
+        acc = TABLES[0]
+        for i in range(GUESTS):
+            print(costraints.columns[m.evaluate(seat[i]).as_long()])
+            if (i+1) == acc and (i+1) < GUESTS:
                 t += 1
-                acc += TAVOLI[t]
+                acc += TABLES[t]
                 print("-------------")
-                print("tavolo ", t + 1)
+                print("table", t + 1)
     else:
         print("unsat")

@@ -2,54 +2,54 @@ from z3 import *
 import pandas as pd
 import numpy as np
 
+import datetime
+
+set_param('parallel.enable', True)
 ###################################
 # global variables
 
-GUESTS = 10
-
 TABLES = [3,3,2,2]
+#NUM_TABLES = 15
+#SIZE_TABLES = 10
+NUM_TABLES = 3
+SIZE_TABLES = 4
 
 ###################################
 # utilities
 
-def sumscan(l):
-    acc = 0
-    result = [acc]
-    for i in range(len(l)):
-        acc += l[i]
-        result.append(acc)
-    return result
-
-def neighbours(seat):
-    startingSeats = sumscan(TABLES)
-    return [ startingSeats[i] + j
-            for i in range(len(TABLES))
-            for j in range(TABLES[i])
-            if ((seat >= startingSeats[i] and seat < startingSeats[i+1])) ]
-
-
-
+def printModel(m):
+    for t in range(NUM_TABLES):
+        print("-------------")
+        print("table", t + 1)
+        for g in range(num_guests):
+            if m.evaluate(seats[t][g]):
+                print(costraints.columns[g])
 
 ###################################
 # model definition
 
 if __name__ == "__main__":
 
-    numTables = len(TABLES)
-    tablesStartingSeats = sumscan(TABLES)
-    
-    # constraint matrix, 100 and -100 are hard constraints, intermediate values are just preferences
-    costraints = pd.read_csv("test.csv")
+    num_guests = len(costraints.columns)
+
+    min_known_neighbours = 1
+
+    # constraint matrix, 100 and -1 are hard constraints, intermediate values are just preferences
+    #costraints = pd.read_csv("test.csv")
+    costraints = pd.read_csv("test1.csv")
 
     seatNeighbour = np.zeros(costraints.shape, int)
     seatNeighbour[costraints == 100] = 1
 
     separated = np.zeros(costraints.shape, int)
-    separated[costraints == -100] = 1
+    separated[costraints == -1] = 1
 
-    preferences = costraints.to_numpy()
+    preferences = costraints.to_numpy(copy=True)
     preferences[preferences==100] = 0
-    preferences[preferences==-100] = 0
+    preferences[preferences==-1] = 0
+
+    connections = costraints.to_numpy(copy=True)
+    connections[connections < 0] = 0
 
     #solver
     s = Optimize()
@@ -58,77 +58,88 @@ if __name__ == "__main__":
     # model variables
 
     # one seat for every guest
-    seat = [Int("seat_%s" % i) for i in range(GUESTS)]
+    seats = [[Bool("table_%s_seat_%s" % (t, g)) for g in range(num_guests)] for t in range(NUM_TABLES)]
 
-    # z3 "matrix" to be accessed throught z3 variables as indexes
-    PREF = Array("PREF", IntSort(), IntSort())
-    for i in range(GUESTS):
-        for j in range (i):
-            PREF = Store(PREF, (j + i*GUESTS), int(preferences[i][j]))
+    colocated = [[Bool("guest_%s_guest_%s" % (g1, g2)) for g2 in range(g1)] for g1 in range(num_guests)]
+
+    same_table = [[[Bool("g_%s_g%s_t%s" % (g1, g2, t)) 
+                    for t in range(NUM_TABLES)]
+                   for g2 in range(g1)]
+                  for g1 in range(num_guests)]
 
     ###################################
     # Solution constraints
 
-    # for every seat there must be a guest assigned
-    seat_val = [And(0 <= seat[i], seat[i] < GUESTS) for i in range(GUESTS)]
+    print("inizio setup constraints", datetime.datetime.now())
 
-    # every guest must have a unique seat
-    everyone_seated = [Distinct([seat[i] for i in range(GUESTS)])]
 
-    # every guest must be at the same table of its seat neighbours
-    neighbour_c = [Or([Or([And(seat[s] == i, seat[t] == j) for s in neighbours(tablesStartingSeats[k])
-                     for t in neighbours(tablesStartingSeats[k]) if (s < GUESTS and t < GUESTS)])
-                 for k in range(numTables)]) 
-             for i in range(GUESTS) 
-             for j in range(GUESTS) if seatNeighbour[i][j] == 1]
+    everyone_seated_c = [Sum([(seats[t][g]) for t in range(NUM_TABLES)]) == 1 for g in range(num_guests)]
 
-    # every guest must be in a different table with respect to the guests marked as separated
-    separated_c = [Not(Or([Or([And(seat[s] == i, seat[t] == j) for s in neighbours(tablesStartingSeats[k])
-                         for t in neighbours(tablesStartingSeats[k]) if (s < GUESTS and t < GUESTS)])
-                     for k in range(numTables)]))
-             for i in range(GUESTS)
-             for j in range(GUESTS) if separated[i][j] == 1]
+    tavoli_c = [Sum([seats[t][g] for g in range(num_guests)]) <= SIZE_TABLES for t in range(NUM_TABLES)]
 
-    #################################
-    # Find the optimal solution
+    link_table_seat_c = [And([
+        Or([
+            Not(seats[t][g1]),
+            Not(seats[t][g2]),
+            same_table[g1][g2][t]
+            ]),
+        Implies(same_table[g1][g2][t], seats[t][g1]),
+        Implies(same_table[g1][g2][t], seats[t][g2])
+        ])
+                           for g1 in range(num_guests)
+                           for g2 in range(g1)
+                           for t in range(NUM_TABLES)]
 
-    # list of preference values computed for every table to be maximized
-    totalPreference = []
-    for t in range(numTables):
-        for i in range(TABLES[t]):
-            for j in range(i+1,TABLES[t]):
-                if (j + tablesStartingSeats[t]) < GUESTS and (i + tablesStartingSeats[t]) < GUESTS:
-                    i1 = seat[i + tablesStartingSeats[t]]
-                    i2 = seat[j + tablesStartingSeats[t]]
-                    #impose an ordering constraint to the table for performance reason
-                    s.add(i1 > i2)
-                    totalPreference.append(Select(PREF,(i2 + i1*GUESTS)))
+    link_colocated_same_table_c = [
+            Sum([same_table[g1][g2][t] for t in range(NUM_TABLES)]) == colocated[g1][g2]
+            for g1 in range(num_guests)
+            for g2 in range(g1)
+            ]
 
-    #################################
+    neighbour_c = [colocated[g1][g2] for g1 in range(num_guests) for g2 in range(g1) if seatNeighbour[g1][g2] == 1]
 
-    s.add(seat_val)
-    s.add(everyone_seated)
+    separated_c = [Not(colocated[g1][g2]) for g1 in range(num_guests) for g2 in range(g1) if separated[g1][g2] == 1]
+
+    min_known_neighbours_c = [
+            Sum([same_table[g2][g][t]
+                 for g2 in range(g + 1, num_guests)
+                 for t in range(NUM_TABLES)
+                 if connections[g2][g] > 0]) +
+            Sum([same_table[g][g1][t]
+                 for g1 in range(g)
+                 for t in range(NUM_TABLES)
+                 if connections[g][g1] > 0]) >= min_known_neighbours
+            for g in range(num_guests)]
+
+
+    totalPreference = Sum([
+        connections[g1][g2] * colocated[g1][g2]
+        for g1 in range(num_guests)
+        for g2 in range(g1)
+        if connections[g1][g2] > 0
+        ])
+
+    s.add(everyone_seated_c)
+    s.add(tavoli_c)
+    s.add(link_table_seat_c)
+    s.add(link_colocated_same_table_c)
     s.add(neighbour_c)
     s.add(separated_c)
-    s.maximize(sum(totalPreference))
+    s.add(min_known_neighbours_c)
 
-    #################################
-    #pretty print the final result
+    s.add(seats[0][0])
 
-    if(s.check() == sat):
+    #s.maximize(totalPreference)
+
+    print("inizio check model", datetime.datetime.now())
+
+    if s.check() == sat:
         m = s.model()
-        
-        print("-------------")
-        print("table 1")
+    
+        print("fine check model", datetime.datetime.now())
 
-        t = 0
-        acc = TABLES[0]
-        for i in range(GUESTS):
-            print(costraints.columns[m.evaluate(seat[i]).as_long()])
-            if (i+1) == acc and (i+1) < GUESTS:
-                t += 1
-                acc += TABLES[t]
-                print("-------------")
-                print("table", t + 1)
+        printModel(m)
+
     else:
         print("unsat")
+        print("fine check model", datetime.datetime.now())

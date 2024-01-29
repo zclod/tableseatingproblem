@@ -3,6 +3,7 @@
 let
   my-python-packages = ps: with ps; [
     z3
+    pysmt
     numpy
     pandas
   ];

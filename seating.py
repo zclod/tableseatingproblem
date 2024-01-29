@@ -8,35 +8,31 @@ set_param('parallel.enable', True)
 ###################################
 # global variables
 
-TABLES = [3,3,2,2]
-#NUM_TABLES = 15
-#SIZE_TABLES = 10
-NUM_TABLES = 3
-SIZE_TABLES = 4
+#TABLES = [3,3,2,2]
+NUM_TABLES = 14
+SIZE_TABLES = 10
+#NUM_TABLES = 4
+#SIZE_TABLES = 3
 
 ###################################
 # utilities
 
-def printModel(m):
+def printModel(m, names):
     for t in range(NUM_TABLES):
         print("-------------")
         print("table", t + 1)
         for g in range(num_guests):
             if m.evaluate(seats[t][g]):
-                print(costraints.columns[g])
+                print(names[g])
 
 ###################################
 # model definition
 
 if __name__ == "__main__":
 
-    num_guests = len(costraints.columns)
-
-    min_known_neighbours = 1
-
-    # constraint matrix, 100 and -1 are hard constraints, intermediate values are just preferences
-    #costraints = pd.read_csv("test.csv")
-    costraints = pd.read_csv("test1.csv")
+    # costraint matrix, 100 and -1 are hard constraints, intermediate values are just preferences
+    costraints = pd.read_csv("invitati.csv")
+    #costraints = pd.read_csv("test1.csv")
 
     seatNeighbour = np.zeros(costraints.shape, int)
     seatNeighbour[costraints == 100] = 1
@@ -44,15 +40,17 @@ if __name__ == "__main__":
     separated = np.zeros(costraints.shape, int)
     separated[costraints == -1] = 1
 
-    preferences = costraints.to_numpy(copy=True)
-    preferences[preferences==100] = 0
-    preferences[preferences==-1] = 0
-
-    connections = costraints.to_numpy(copy=True)
+    connections = costraints.to_numpy()
     connections[connections < 0] = 0
+
+    num_guests = len(costraints.columns)
+    guests_names = costraints.columns
+
+    min_known_neighbours = 2
 
     #solver
     s = Optimize()
+    #s = Solver()
 
     ###################################
     # model variables
@@ -71,7 +69,6 @@ if __name__ == "__main__":
     # Solution constraints
 
     print("inizio setup constraints", datetime.datetime.now())
-
 
     everyone_seated_c = [Sum([(seats[t][g]) for t in range(NUM_TABLES)]) == 1 for g in range(num_guests)]
 
@@ -138,7 +135,24 @@ if __name__ == "__main__":
     
         print("fine check model", datetime.datetime.now())
 
-        printModel(m)
+        printModel(m, guests_names)
+
+        lb = m.evaluate(totalPreference)
+
+        while True:
+            s.push()
+            s.add(totalPreference > lb)
+
+            if s.check() == sat:
+                lb = s.model().evaluate(totalPreference)
+                print(lb)
+                printModel(s.model(), guests_names)
+                s.pop()
+
+            else:
+                break
+
+
 
     else:
         print("unsat")

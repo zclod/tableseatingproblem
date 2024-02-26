@@ -8,11 +8,9 @@ set_param('parallel.enable', True)
 ###################################
 # global variables
 
-#TABLES = [3,3,2,2]
-NUM_TABLES = 14
-SIZE_TABLES = 10
-#NUM_TABLES = 4
-#SIZE_TABLES = 3
+# TABLES = [3,3,2,2]
+TABLES = [10,10,10,10,10,10,10,10,10,10,10,10,10,10]
+NUM_TABLES = len(TABLES)
 
 ###################################
 # utilities
@@ -32,7 +30,7 @@ if __name__ == "__main__":
 
     # costraint matrix, 100 and -1 are hard constraints, intermediate values are just preferences
     costraints = pd.read_csv("invitati.csv")
-    #costraints = pd.read_csv("test1.csv")
+    # costraints = pd.read_csv("test1.csv")
 
     seatNeighbour = np.zeros(costraints.shape, int)
     seatNeighbour[costraints == 100] = 1
@@ -46,7 +44,7 @@ if __name__ == "__main__":
     num_guests = len(costraints.columns)
     guests_names = costraints.columns
 
-    min_known_neighbours = 2
+    min_known_neighbours = 0
 
     #solver
     s = Optimize()
@@ -72,7 +70,7 @@ if __name__ == "__main__":
 
     everyone_seated_c = [Sum([(seats[t][g]) for t in range(NUM_TABLES)]) == 1 for g in range(num_guests)]
 
-    tavoli_c = [Sum([seats[t][g] for g in range(num_guests)]) <= SIZE_TABLES for t in range(NUM_TABLES)]
+    tavoli_c = [Sum([seats[t][g] for g in range(num_guests)]) <= TABLES[t] for t in range(NUM_TABLES)]
 
     link_table_seat_c = [And([
         Or([

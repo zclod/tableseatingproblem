@@ -8,8 +8,9 @@ set_param('parallel.enable', True)
 ###################################
 # global variables
 
-# TABLES = [3,3,2,2]
-TABLES = [10,10,10,10,10,10,10,10,10,10,10,10,10,10]
+TABLES = [3,3,2,2]
+# TABLES = [10,10,10,10,10,8,8,8,8,8,8]
+# TABLES = [11,10,10,10,9,8,8,8,8,8,8]
 NUM_TABLES = len(TABLES)
 
 ###################################
@@ -28,21 +29,21 @@ def printModel(m, names):
 
 if __name__ == "__main__":
 
-    # costraint matrix, 100 and -1 are hard constraints, intermediate values are just preferences
-    costraints = pd.read_csv("invitati.csv")
-    # costraints = pd.read_csv("test1.csv")
+    # constraint matrix, 100 and -1 are hard constraints, intermediate values are just preferences
+    # constraints = pd.read_csv("prova1.csv")
+    constraints = pd.read_csv("test.csv")
 
-    seatNeighbour = np.zeros(costraints.shape, int)
-    seatNeighbour[costraints == 100] = 1
+    seatNeighbour = np.zeros(constraints.shape, int)
+    seatNeighbour[constraints == 100] = 1
 
-    separated = np.zeros(costraints.shape, int)
-    separated[costraints == -1] = 1
+    separated = np.zeros(constraints.shape, int)
+    separated[constraints == -1] = 1
 
-    connections = costraints.to_numpy()
+    connections = constraints.to_numpy()
     connections[connections < 0] = 0
 
-    num_guests = len(costraints.columns)
-    guests_names = costraints.columns
+    num_guests = len(constraints.columns)
+    guests_names = constraints.columns
 
     min_known_neighbours = 0
 
@@ -66,7 +67,7 @@ if __name__ == "__main__":
     ###################################
     # Solution constraints
 
-    print("inizio setup constraints", datetime.datetime.now())
+    print("start constraints generation", datetime.datetime.now())
 
     everyone_seated_c = [Sum([(seats[t][g]) for t in range(NUM_TABLES)]) == 1 for g in range(num_guests)]
 
@@ -122,20 +123,19 @@ if __name__ == "__main__":
     s.add(separated_c)
     s.add(min_known_neighbours_c)
 
-    s.add(seats[0][0])
+    # s.add(seats[0][0])
 
     #s.maximize(totalPreference)
 
-    print("inizio check model", datetime.datetime.now())
+    print("start model check", datetime.datetime.now())
 
     if s.check() == sat:
         m = s.model()
-    
-        print("fine check model", datetime.datetime.now())
-
-        printModel(m, guests_names)
-
         lb = m.evaluate(totalPreference)
+
+        print()
+        print("current solution score: ", lb)
+        printModel(m, guests_names)
 
         while True:
             s.push()
@@ -143,15 +143,14 @@ if __name__ == "__main__":
 
             if s.check() == sat:
                 lb = s.model().evaluate(totalPreference)
-                print(lb)
+                print()
+                print("current solution score: ", lb)
                 printModel(s.model(), guests_names)
                 s.pop()
 
             else:
                 break
 
-
-
     else:
         print("unsat")
-        print("fine check model", datetime.datetime.now())
+        print("end model check", datetime.datetime.now())

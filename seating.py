@@ -1,6 +1,7 @@
 from z3 import *
 import pandas as pd
 import numpy as np
+import sys
 
 import datetime
 
@@ -8,10 +9,12 @@ set_param('parallel.enable', True)
 ###################################
 # global variables
 
-TABLES = [3,3,2,2]
-# TABLES = [10,10,10,10,10,8,8,8,8,8,8]
-# TABLES = [11,10,10,10,9,8,8,8,8,8,8]
+TABLES = [int(i) for i in sys.argv[1:]]
 NUM_TABLES = len(TABLES)
+
+if NUM_TABLES == 0:
+    print("Usage: cat <constraints.csv> | python seating.py <table1_size> <table2_size> ...", file=sys.stderr)
+    sys.exit(1)
 
 ###################################
 # utilities
@@ -31,7 +34,7 @@ if __name__ == "__main__":
 
     # constraint matrix, 100 and -1 are hard constraints, intermediate values are just preferences
     # constraints = pd.read_csv("prova1.csv")
-    constraints = pd.read_csv("test.csv")
+    constraints = pd.read_csv(sys.stdin)
 
     seatNeighbour = np.zeros(constraints.shape, int)
     seatNeighbour[constraints == 100] = 1
